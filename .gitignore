@@ -15,6 +15,11 @@ dist-ssr
 # Reference projects
 wllama
 
+# Dev docs (not for repo)
+Rules.md
+STAGES.md
+PLAN.md
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
