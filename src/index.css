@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+body {
+  margin: 0;
+}
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.2s ease-out;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #52525b; }

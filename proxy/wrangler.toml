@@ -1,0 +1,7 @@
+name = "goku-proxy"
+main = "index.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+# CHANGE THIS to your GitHub Pages URL (include trailing slash)
+SITE_URL = "https://YOUR_USERNAME.github.io/goku/"
