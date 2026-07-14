@@ -91,7 +91,7 @@ export default function ChatView() {
           <div className="flex flex-col items-center justify-center h-full text-zinc-500">
             {state.models.length === 0 ? (
               <div className="text-center space-y-3">
-                <div className="text-4xl mb-2">⚡</div>
+                <div className="text-4xl mb-2 text-zinc-600">G</div>
                 <p className="text-xl font-medium text-zinc-300">Welcome to Goku</p>
                 <p className="text-sm max-w-sm">Download a model from HuggingFace to start chatting. Everything runs in your browser.</p>
                 <button
@@ -103,13 +103,13 @@ export default function ChatView() {
               </div>
             ) : !state.activeModelId ? (
               <div className="text-center space-y-3">
-                <div className="text-4xl mb-2">🔌</div>
+                <div className="text-4xl mb-2 text-zinc-600">{'>'}</div>
                 <p className="text-xl font-medium text-zinc-300">Select a model</p>
                 <p className="text-sm">Choose a model from the dropdown above to start chatting</p>
               </div>
             ) : (
               <div className="text-center space-y-3">
-                <div className="text-4xl mb-2">💬</div>
+                <div className="text-4xl mb-2 text-zinc-600">_</div>
                 <p className="text-xl font-medium text-zinc-300">Start chatting</p>
                 <p className="text-sm">Type a message below to begin</p>
               </div>

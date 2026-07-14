@@ -4,6 +4,60 @@ export interface HuggingFaceFile {
   lfs?: { oid: string; size: number; pointerSize: number };
 }
 
+export interface GgufFileGroup {
+  displayName: string;
+  files: HuggingFaceFile[];
+  totalSize: number;
+  isSharded: boolean;
+}
+
+const SHARD_REGEX = /^(.*?)-(\d{5})-of-(\d{5})\.gguf$/;
+
+function parseShardInfo(path: string): { base: string; index: number; total: number } | null {
+  const match = path.match(SHARD_REGEX);
+  if (!match) return null;
+  return { base: match[1], index: parseInt(match[2], 10), total: parseInt(match[3], 10) };
+}
+
+export function groupGgufFiles(files: HuggingFaceFile[]): GgufFileGroup[] {
+  const shards = new Map<string, HuggingFaceFile[]>();
+  const standalone: HuggingFaceFile[] = [];
+
+  for (const file of files) {
+    const info = parseShardInfo(file.path);
+    if (info) {
+      const key = `${info.base}-${info.total}`;
+      if (!shards.has(key)) shards.set(key, []);
+      shards.get(key)!.push(file);
+    } else {
+      standalone.push(file);
+    }
+  }
+
+  const groups: GgufFileGroup[] = [];
+
+  for (const [, shardFiles] of shards) {
+    shardFiles.sort((a, b) => a.path.localeCompare(b.path));
+    const firstShard = parseShardInfo(shardFiles[0].path);
+    const total = firstShard?.total ?? shardFiles.length;
+    const displayName = shardFiles[0].path.replace(SHARD_REGEX, `$1 ($total shards)`);
+    const totalSize = shardFiles.reduce((sum, f) => sum + f.size, 0);
+    groups.push({ displayName, files: shardFiles, totalSize, isSharded: true });
+  }
+
+  for (const file of standalone) {
+    groups.push({
+      displayName: file.path,
+      files: [file],
+      totalSize: file.size,
+      isSharded: false,
+    });
+  }
+
+  groups.sort((a, b) => a.displayName.localeCompare(b.displayName));
+  return groups;
+}
+
 export interface ParsedModelUrl {
   repo: string;
   file?: string;
@@ -60,6 +114,14 @@ export async function listGgufFiles(
       size: s.size ?? s.lfs?.size ?? 0,
       lfs: s.lfs,
     }));
+}
+
+export async function listGgufFileGroups(
+  repo: string,
+  token?: string
+): Promise<GgufFileGroup[]> {
+  const files = await listGgufFiles(repo, token);
+  return groupGgufFiles(files);
 }
 
 export async function getFileSizeFromUrl(

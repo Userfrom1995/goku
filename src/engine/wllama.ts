@@ -16,7 +16,7 @@ export interface EngineBackend {
 }
 
 export interface WllamaEngine {
-  loadModelFromBlob(blob: Blob, nCtx: number, nGpuLayers?: number, adaptive?: boolean): Promise<EngineBackend>;
+  loadModelFromBlob(blob: Blob | Blob[], nCtx: number, nGpuLayers?: number, adaptive?: boolean): Promise<EngineBackend>;
   unloadModel(): Promise<void>;
   generate(messages: { role: string; content: string }[], opts: {
     temperature?: number;
@@ -45,20 +45,23 @@ function detectBackend(wllama: Wllama, actualNGpuLayers: number, gpuFailed: bool
   return { type: 'wasm', threads: 1, webgpu: false, multiThread: false, gpuLayersUsed: 0, totalLayers, gpuFailed, nCtxTrain };
 }
 
-async function tryLoadModel(wllama: Wllama, blob: Blob, nCtx: number, nGpuLayers: number): Promise<boolean> {
+async function tryLoadModel(wllama: Wllama, blob: Blob | Blob[], nCtx: number, nGpuLayers: number): Promise<{ ok: boolean; oom?: boolean }> {
   try {
-    await wllama.loadModel([blob], {
+    await wllama.loadModel(Array.isArray(blob) ? blob : [blob], {
       n_ctx: nCtx || 2048,
       n_gpu_layers: nGpuLayers,
     });
-    return true;
-  } catch {
-    return false;
+    return { ok: true };
+  } catch (err: any) {
+    const isOom = err?.message?.includes('out of memory') || err?.message?.includes('OOM') || err?.name?.includes('RangeError');
+    if (isOom) return { ok: false, oom: true };
+    return { ok: false };
   }
 }
 
 export function createWllamaEngine(): WllamaEngine {
   let wllama: Wllama | null = null;
+  let abortController: AbortController | null = null;
 
   const config: WllamaConfig = {
     suppressNativeLog: true,
@@ -68,11 +71,12 @@ export function createWllamaEngine(): WllamaEngine {
     async loadModelFromBlob(blob, nCtx, nGpuLayers = 99999, adaptive = true) {
       if (wllama) await wllama.exit();
       wllama = new Wllama(WASM_PATHS, config);
+      const blobs = Array.isArray(blob) ? blob : [blob];
 
       // Non-adaptive: use exactly what was requested
       if (!adaptive) {
         try {
-          await wllama.loadModel([blob], {
+          await wllama.loadModel(blobs, {
             n_ctx: nCtx || 2048,
             n_gpu_layers: nGpuLayers,
           });
@@ -82,7 +86,7 @@ export function createWllamaEngine(): WllamaEngine {
           if (nGpuLayers > 0) {
             if (wllama) await wllama.exit();
             wllama = new Wllama(WASM_PATHS, config);
-            await wllama.loadModel([blob], {
+            await wllama.loadModel(blobs, {
               n_ctx: nCtx || 2048,
               n_gpu_layers: 0,
             });
@@ -94,17 +98,20 @@ export function createWllamaEngine(): WllamaEngine {
 
       // Adaptive: try different layer counts
       const attempts = [99999, 64, 32, 16, 8, 4, 2, 1, 0];
+      let lastOom = false;
 
       for (const layers of attempts) {
         if (layers > nGpuLayers) continue;
 
         console.log(`[Goku Adaptive] Trying ${layers} GPU layers...`);
-        const success = await tryLoadModel(wllama, blob, nCtx, layers);
+        const result = await tryLoadModel(wllama, blobs, nCtx, layers);
 
-        if (success) {
+        if (result.ok) {
           console.log(`[Goku Adaptive] Success with ${layers} GPU layers`);
           return detectBackend(wllama, layers);
         }
+
+        if (result.oom) lastOom = true;
 
         // Reset for next attempt
         if (wllama) await wllama.exit();
@@ -113,11 +120,15 @@ export function createWllamaEngine(): WllamaEngine {
 
       // All GPU attempts failed, try CPU only
       console.log('[Goku Adaptive] All GPU attempts failed, using CPU only');
-      await wllama.loadModel([blob], {
-        n_ctx: nCtx || 2048,
-        n_gpu_layers: 0,
-      });
-      return detectBackend(wllama, 0);
+      const cpuResult = await tryLoadModel(wllama, blobs, nCtx, 0);
+      if (cpuResult.ok) {
+        return detectBackend(wllama, 0);
+      }
+
+      const msg = lastOom
+        ? `Out of memory. Try lowering context length (currently ${nCtx.toLocaleString()}).`
+        : 'Failed to load model with all GPU/CPU configurations.';
+      throw new Error(msg);
     },
 
     async unloadModel() {
@@ -130,27 +141,35 @@ export function createWllamaEngine(): WllamaEngine {
     async generate(messages, opts) {
       if (!wllama) throw new Error('No model loaded');
 
+      abortController = new AbortController();
+
       const oaiMessages = messages.map(m => ({
         role: m.role as 'system' | 'user' | 'assistant',
         content: m.content,
       }));
 
-      await wllama.createChatCompletion({
-        messages: oaiMessages,
-        stream: true,
-        temperature: opts.temperature ?? 0.7,
-        max_tokens: opts.maxTokens ?? 512,
-        top_p: opts.topP ?? 0.9,
-        top_k: opts.topK ?? 40,
-        onData: (chunk) => {
-          const content = chunk.choices?.[0]?.delta?.content;
-          if (content) opts.onData(content);
-        },
-      });
+      try {
+        await wllama.createChatCompletion({
+          messages: oaiMessages,
+          stream: true,
+          temperature: opts.temperature ?? 0.7,
+          max_tokens: opts.maxTokens ?? 512,
+          top_p: opts.topP ?? 0.9,
+          top_k: opts.topK ?? 40,
+          abortSignal: abortController.signal,
+          onData: (chunk) => {
+            const content = chunk.choices?.[0]?.delta?.content;
+            if (content) opts.onData(content);
+          },
+        });
+      } finally {
+        abortController = null;
+      }
     },
 
     stop() {
-      wllama?.exit();
+      abortController?.abort();
+      abortController = null;
     },
 
     isLoaded() {

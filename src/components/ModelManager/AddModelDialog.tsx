@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { parseHuggingFaceUrl, listGgufFiles, getDownloadUrl, formatFileSize, getFileSizeFromUrl } from '../../engine/huggingface';
+import { parseHuggingFaceUrl, listGgufFileGroups, getDownloadUrl, formatFileSize, getFileSizeFromUrl, type GgufFileGroup } from '../../engine/huggingface';
 import { readGgufMetadata, type GgufMetadata } from '../../engine/gguf';
 import { getWllamaCacheStore } from '../../storage/wllamaCache';
 import * as db from '../../storage/db';
@@ -14,10 +14,9 @@ export default function AddModelDialog({ onClose }: Props) {
   const [url, setUrl] = useState('');
   const [token, setToken] = useState('');
   const [step, setStep] = useState<'input' | 'select' | 'confirm'>('input');
-  const [ggufFiles, setGgufFiles] = useState<{ path: string; size: number }[]>([]);
-  const [selectedFile, setSelectedFile] = useState('');
+  const [groups, setGroups] = useState<GgufFileGroup[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<GgufFileGroup | null>(null);
   const [metadata, setMetadata] = useState<GgufMetadata | null>(null);
-  const [fileSize, setFileSize] = useState(0);
   const [error, setError] = useState('');
   const [repo, setRepo] = useState('');
   const [loading, setLoading] = useState(false);
@@ -30,25 +29,32 @@ export default function AddModelDialog({ onClose }: Props) {
       setRepo(parsed.repo);
 
       if (parsed.file) {
-        setSelectedFile(parsed.file);
+        const group: GgufFileGroup = {
+          displayName: parsed.file,
+          files: [{ path: parsed.file, size: 0 }],
+          totalSize: 0,
+          isSharded: false,
+        };
         const [meta, size] = await Promise.all([
           readGgufMetadata(getDownloadUrl(parsed.repo, parsed.file), token || undefined),
           getFileSizeFromUrl(getDownloadUrl(parsed.repo, parsed.file), token || undefined),
         ]);
+        group.files[0].size = size;
+        group.totalSize = size;
+        setSelectedGroup(group);
         setMetadata(meta);
-        setFileSize(size);
         setStep('confirm');
         setLoading(false);
         return;
       }
 
-      const files = await listGgufFiles(parsed.repo, token || undefined);
-      if (files.length === 0) {
+      const fileGroups = await listGgufFileGroups(parsed.repo, token || undefined);
+      if (fileGroups.length === 0) {
         setError('No GGUF files found in this repository');
         setLoading(false);
         return;
       }
-      setGgufFiles(files);
+      setGroups(fileGroups);
       setStep('select');
     } catch (err: any) {
       setError(err.message);
@@ -56,17 +62,27 @@ export default function AddModelDialog({ onClose }: Props) {
     setLoading(false);
   };
 
-  const handleSelectFile = async (file: string) => {
-    setSelectedFile(file);
+  const handleSelectGroup = async (group: GgufFileGroup) => {
+    setSelectedGroup(group);
     setError('');
     setLoading(true);
     try {
+      const firstFile = group.files[0].path;
       const [meta, size] = await Promise.all([
-        readGgufMetadata(getDownloadUrl(repo, file), token || undefined),
-        getFileSizeFromUrl(getDownloadUrl(repo, file), token || undefined),
+        readGgufMetadata(getDownloadUrl(repo, firstFile), token || undefined),
+        group.isSharded
+          ? Promise.all(group.files.map(f => getFileSizeFromUrl(getDownloadUrl(repo, f.path), token || undefined)))
+              .then(sizes => sizes.reduce((a, b) => a + b, 0))
+          : getFileSizeFromUrl(getDownloadUrl(repo, firstFile), token || undefined),
       ]);
+
+      if (group.isSharded) {
+        const sizes = await Promise.all(group.files.map(f => getFileSizeFromUrl(getDownloadUrl(repo, f.path), token || undefined)));
+        group.files.forEach((f, i) => { f.size = sizes[i]; });
+        group.totalSize = sizes.reduce((a, b) => a + b, 0);
+      }
+
       setMetadata(meta);
-      setFileSize(size);
       setStep('confirm');
     } catch (err: any) {
       setError(err.message);
@@ -75,19 +91,22 @@ export default function AddModelDialog({ onClose }: Props) {
   };
 
   const handleDownload = async () => {
-    const downloadUrl = getDownloadUrl(repo, selectedFile);
-    const modelId = `${repo}/${selectedFile}`.replace(/[^a-zA-Z0-9]/g, '_');
+    if (!selectedGroup) return;
+
+    const allUrls = selectedGroup.files.map(f => getDownloadUrl(repo, f.path));
+    const firstUrl = allUrls[0];
+    const modelId = `${repo}/${selectedGroup.files[0].path}`.replace(/[^a-zA-Z0-9]/g, '_');
 
     const task: DownloadTask = {
       id: crypto.randomUUID(),
       modelId,
-      fileName: selectedFile,
+      fileName: selectedGroup.displayName,
       repo,
-      url: downloadUrl,
+      url: firstUrl,
       token: token || undefined,
       progress: 0,
       status: 'downloading',
-      totalBytes: fileSize,
+      totalBytes: selectedGroup.totalSize,
       receivedBytes: 0,
       metadata: metadata ? {
         architecture: metadata.architecture,
@@ -96,52 +115,64 @@ export default function AddModelDialog({ onClose }: Props) {
         parameterCount: metadata.parameterCount,
         name: metadata.name,
       } : undefined,
+      files: allUrls,
+      totalShards: selectedGroup.files.length,
     };
 
     dispatch({ type: 'ADD_DOWNLOAD', task });
     onClose();
 
-    // Create abort controller for this download
     const abortController = new AbortController();
-    // Store it in a way that cancelDownload can access it
     (window as any).__gokuAbortControllers = (window as any).__gokuAbortControllers || {};
     (window as any).__gokuAbortControllers[task.id] = abortController;
 
-    // Background download using CacheManager (streaming, no memory buffer)
     (async () => {
       try {
         const cache = await getWllamaCacheStore();
         const headers: Record<string, string> = {};
         if (token) headers['Authorization'] = `Bearer ${token}`;
 
-        await cache.download(downloadUrl, {
-          headers,
-          signal: abortController.signal,
-          progressCallback: ({ loaded, total }) => {
-            if (total > 0) {
-              dispatch({ type: 'UPDATE_DOWNLOAD', id: task.id, update: {
-                progress: Math.round((loaded / total) * 100),
-                receivedBytes: loaded,
-                totalBytes: total,
-              }});
-            }
-          },
-        });
+        const totalShards = allUrls.length;
+        let completedShards = 0;
+
+        for (let i = 0; i < allUrls.length; i++) {
+          if (abortController.signal.aborted) break;
+
+          await cache.download(allUrls[i], {
+            headers,
+            signal: abortController.signal,
+            progressCallback: ({ loaded, total }) => {
+              if (total > 0) {
+                const shardProgress = loaded / total;
+                const overallProgress = ((completedShards + shardProgress) / totalShards) * 100;
+                const overallLoaded = completedShards * (selectedGroup.totalSize / totalShards) + loaded;
+                dispatch({ type: 'UPDATE_DOWNLOAD', id: task.id, update: {
+                  progress: Math.round(overallProgress),
+                  receivedBytes: Math.round(overallLoaded),
+                  totalBytes: selectedGroup.totalSize,
+                }});
+              }
+            },
+          });
+          completedShards++;
+        }
 
         const modelRecord: ModelMetadata = {
           id: modelId,
-          name: metadata?.name || selectedFile.replace('.gguf', ''),
+          name: metadata?.name || selectedGroup.displayName.replace('.gguf', ''),
           repo,
-          file: selectedFile,
-          url: downloadUrl,
-          sizeBytes: fileSize,
+          file: selectedGroup.files[0].path,
+          url: firstUrl,
+          sizeBytes: selectedGroup.totalSize,
           quantization: metadata?.quantization || 'unknown',
           architecture: metadata?.architecture || 'unknown',
           contextLength: metadata?.contextLength || 2048,
           totalLayers: metadata?.totalLayers || 0,
           parameterCount: metadata?.parameterCount || 'unknown',
           downloadedAt: Date.now(),
-          storageKey: downloadUrl, // Use URL as storage key for CacheManager
+          storageKey: firstUrl,
+          files: allUrls,
+          totalShards: selectedGroup.files.length,
         };
 
         await db.saveModel(modelRecord);
@@ -155,7 +186,7 @@ export default function AddModelDialog({ onClose }: Props) {
     })();
   };
 
-  const totalSize = metadata ? (fileSize || ggufFiles.find(f => f.path === selectedFile)?.size || 0) : 0;
+  const totalSize = selectedGroup?.totalSize || 0;
   const fitCheck = totalSize > 0 ? checkModelFit(totalSize, state.device) : null;
 
   return (
@@ -164,20 +195,18 @@ export default function AddModelDialog({ onClose }: Props) {
         className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-lg shadow-2xl"
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="px-6 py-4 border-b border-zinc-800">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-zinc-100">Add Model</h2>
-            <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 text-lg">×</button>
+            <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 text-lg">x</button>
           </div>
           <p className="text-sm text-zinc-500 mt-0.5">
             {step === 'input' && 'Paste a HuggingFace URL or namespace/repo'}
-            {step === 'select' && 'Select a GGUF file to download'}
+            {step === 'select' && 'Select a GGUF model to download'}
             {step === 'confirm' && 'Review model details before downloading'}
           </p>
         </div>
 
-        {/* Body */}
         <div className="px-6 py-4">
           {step === 'input' && (
             <div className="space-y-4">
@@ -220,24 +249,27 @@ export default function AddModelDialog({ onClose }: Props) {
           {step === 'select' && (
             <div className="space-y-3">
               <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
-                {ggufFiles.map(f => (
+                {groups.map((g, i) => (
                   <button
-                    key={f.path}
-                    onClick={() => handleSelectFile(f.path)}
+                    key={i}
+                    onClick={() => handleSelectGroup(g)}
                     className="w-full text-left px-3 py-2.5 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 rounded-lg transition-colors"
                   >
-                    <span className="text-sm text-zinc-300 block truncate">{f.path}</span>
-                    <span className="text-xs text-zinc-500">{f.size > 0 ? formatFileSize(f.size) : 'size unknown'}</span>
+                    <span className="text-sm text-zinc-300 block truncate">{g.displayName}</span>
+                    <span className="text-xs text-zinc-500">
+                      {g.totalSize > 0 ? formatFileSize(g.totalSize) : 'size unknown'}
+                      {g.isSharded && ` (${g.files.length} shards)`}
+                    </span>
                   </button>
                 ))}
               </div>
               <button onClick={() => setStep('input')} className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors">
-                ← Back
+                {'<- Back'}
               </button>
             </div>
           )}
 
-          {step === 'confirm' && metadata && (
+          {step === 'confirm' && metadata && selectedGroup && (
             <div className="space-y-4">
               <div className="bg-zinc-800/50 rounded-xl p-4 space-y-2.5">
                 <div className="flex justify-between text-sm">
@@ -257,12 +289,18 @@ export default function AddModelDialog({ onClose }: Props) {
                   <span className="text-zinc-200">{metadata.parameterCount}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-zinc-500">File Size</span>
+                  <span className="text-zinc-500">Total Size</span>
                   <span className="text-zinc-200">{totalSize > 0 ? formatFileSize(totalSize) : 'unknown'}</span>
                 </div>
+                {selectedGroup.isSharded && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-zinc-500">Shards</span>
+                    <span className="text-zinc-200">{selectedGroup.files.length} files</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">File</span>
-                  <span className="text-zinc-200 font-mono text-xs truncate max-w-[60%]">{selectedFile}</span>
+                  <span className="text-zinc-200 font-mono text-xs truncate max-w-[60%]">{selectedGroup.displayName}</span>
                 </div>
               </div>
 
@@ -284,7 +322,6 @@ export default function AddModelDialog({ onClose }: Props) {
           )}
         </div>
 
-        {/* Footer */}
         {step !== 'confirm' && (
           <div className="px-6 pb-4">
             <button onClick={onClose} className="text-sm text-zinc-600 hover:text-zinc-400 transition-colors">Cancel</button>

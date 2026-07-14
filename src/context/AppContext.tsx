@@ -148,14 +148,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'SET_ENGINE', engine: { state: 'loading', modelId, progress: 0, error: null } });
     try {
       const cache = await getWllamaCacheStore();
-      const blob = await cache.load(model.url);
-      if (!blob) throw new Error('Model file not found. Please re-download.');
+
+      // Support multi-shard models: load all shard URLs
+      let blob: Blob | Blob[];
+      if (model.files && model.files.length > 1) {
+        const blobs = await cache.loadMultiple(model.files);
+        if (blobs.length !== model.files.length) {
+          throw new Error(`Some model files are missing. Expected ${model.files.length} shards, found ${blobs.length}. Please re-download.`);
+        }
+        blob = blobs;
+      } else {
+        const singleBlob = await cache.load(model.url);
+        if (!singleBlob) throw new Error('Model file not found. Please re-download.');
+        blob = singleBlob;
+      }
 
       const gpuLayers = state.generation.gpuEnabled
         ? (state.generation.gpuAdaptive ? 99999 : state.generation.nGpuLayers)
         : 0;
 
-      // Use per-model context override, or model's max, or default 2048
       const contextLength = state.modelContextOverrides[modelId] || model.contextLength || 2048;
 
       const backend = await engineRef.current.loadModelFromBlob(
@@ -169,7 +180,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         toast('GPU failed to allocate. Model loaded on CPU instead.', 'error');
       }
 
-      // Update model's contextLength and totalLayers with real values from wllama
       const needsUpdate =
         (backend.nCtxTrain && backend.nCtxTrain !== model.contextLength) ||
         (backend.totalLayers && backend.totalLayers !== model.totalLayers);
@@ -184,7 +194,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'UPDATE_MODEL', model: updatedModel });
       }
 
-      // Clamp override if it exceeds discovered nCtxTrain
       if (backend.nCtxTrain) {
         const currentOverride = state.modelContextOverrides[modelId];
         if (currentOverride && currentOverride > backend.nCtxTrain) {
@@ -295,12 +304,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await db.saveChatSession(finalSession);
       dispatch({ type: 'SET_ENGINE', engine: { state: 'ready' } });
     } catch (err: any) {
-      dispatch({ type: 'SET_ENGINE', engine: { state: state.engine.state === 'generating' ? 'ready' : state.engine.state, error: err.message } });
+      const isAbort = err?.name === 'WllamaAbortError' || err?.message?.includes('abort');
+      if (!isAbort) {
+        dispatch({ type: 'SET_ENGINE', engine: { state: state.engine.state === 'generating' ? 'ready' : state.engine.state, error: err.message } });
+      }
     }
   }, [state.activeModelId, state.activeSessionId, state.sessions, state.engine.state, state.generation, loadModelToEngine]);
 
   const stopGeneration = useCallback(() => {
     engineRef.current.stop();
+    dispatch({ type: 'SET_ENGINE', engine: { state: 'ready', error: null } });
   }, []);
 
   const unloadModel = useCallback(async () => {
@@ -369,7 +382,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const model = state.models.find(m => m.id === id);
     if (model) {
       const cache = await getWllamaCacheStore();
-      await cache.delete(model.url);
+      if (model.files && model.files.length > 1) {
+        await cache.deleteMultiple(model.files);
+      } else {
+        await cache.delete(model.url);
+      }
     }
     await db.deleteModel(id);
     dispatch({ type: 'DELETE_MODEL', id });

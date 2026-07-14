@@ -13,7 +13,7 @@ npm install -g wrangler
 # 2. Login to Cloudflare (free account)
 wrangler login
 
-# 3. Edit wrangler.toml — set SITE_URL to your GitHub Pages URL
+# 3. Edit wrangler.toml - set SITE_URL to your GitHub Pages URL
 # e.g. SITE_URL = "https://username.github.io/goku/"
 
 # 4. Deploy

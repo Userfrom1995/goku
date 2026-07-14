@@ -8,7 +8,9 @@ export interface CacheProgress {
 export interface WllamaCacheStore {
   download(url: string, options?: DownloadOptions): Promise<void>;
   load(url: string): Promise<Blob | null>;
+  loadMultiple(urls: string[]): Promise<Blob[]>;
   delete(url: string): Promise<void>;
+  deleteMultiple(urls: string[]): Promise<void>;
   has(url: string): Promise<boolean>;
   getSize(url: string): Promise<number>;
 }
@@ -37,8 +39,23 @@ export async function getWllamaCacheStore(): Promise<WllamaCacheStore> {
       return cm.open(url);
     },
 
+    async loadMultiple(urls) {
+      const blobs: Blob[] = [];
+      for (const url of urls) {
+        const blob = await cm.open(url);
+        if (blob) blobs.push(blob);
+      }
+      return blobs;
+    },
+
     async delete(url) {
       await cm.delete(url);
+    },
+
+    async deleteMultiple(urls) {
+      for (const url of urls) {
+        await cm.delete(url);
+      }
     },
 
     async has(url) {

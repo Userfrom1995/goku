@@ -7,11 +7,13 @@ export interface ModelMetadata {
   sizeBytes: number;
   quantization: string;
   architecture: string;
-  contextLength: number; // Model's max context from GGUF
-  totalLayers: number; // Model's total layers (from GGUF or discovered after load)
+  contextLength: number;
+  totalLayers: number;
   parameterCount: string;
   downloadedAt: number;
   storageKey: string;
+  files?: string[];
+  totalShards?: number;
 }
 
 export interface DeviceCapabilities {
@@ -99,4 +101,6 @@ export interface DownloadTask {
     parameterCount: string;
     name: string;
   };
+  files?: string[];
+  totalShards?: number;
 }

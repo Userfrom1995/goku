@@ -88,7 +88,7 @@ export default function ModelsView() {
 
           {models.length === 0 && (
             <div className="text-center py-12 text-zinc-500">
-              <div className="text-3xl mb-2">📦</div>
+              <div className="text-3xl mb-2 text-zinc-600">[ ]</div>
               <p className="text-sm">No models downloaded yet</p>
               <button
                 onClick={() => setShowAdd(true)}
@@ -122,7 +122,13 @@ export default function ModelsView() {
                   <div className="flex items-center gap-3 mt-1.5">
                     <span className="text-xs px-2 py-0.5 bg-zinc-800 rounded-md text-zinc-400 font-mono">{m.quantization}</span>
                     <span className="text-xs text-zinc-500">{formatFileSize(m.sizeBytes)}</span>
-                    <span className="text-xs text-zinc-600">·</span>
+                    {m.totalShards && m.totalShards > 1 && (
+                      <>
+                        <span className="text-xs text-zinc-600">/</span>
+                        <span className="text-xs text-zinc-500">{m.totalShards} shards</span>
+                      </>
+                    )}
+                    <span className="text-xs text-zinc-600">/</span>
                     <span className="text-xs text-zinc-500">{m.architecture}</span>
                     {m.totalLayers > 0 && (
                       <>
@@ -186,7 +192,7 @@ export default function ModelsView() {
                             <span className="text-xs text-zinc-600">/ {nCtxTrain.toLocaleString()} max</span>
                             {isOver && (
                               <span className="text-xs text-amber-500" title={`Loaded with ${loadedCtx.toLocaleString()} but model supports ${nCtxTrain.toLocaleString()}. Quality may degrade.`}>
-                                ⚠
+                                !
                               </span>
                             )}
                           </div>
@@ -204,8 +210,8 @@ export default function ModelsView() {
                       }`}>
                         {engine.backend.webgpu
                           ? (engine.backend.gpuLayersUsed >= engine.backend.totalLayers
-                            ? `✓ GPU (${engine.backend.totalLayers}/${engine.backend.totalLayers})`
-                            : `✓ GPU partial (${engine.backend.gpuLayersUsed}/${engine.backend.totalLayers})`)
+                            ? `GPU (${engine.backend.totalLayers}/${engine.backend.totalLayers})`
+                            : `GPU partial (${engine.backend.gpuLayersUsed}/${engine.backend.totalLayers})`)
                           : 'CPU'}
                       </span>
                       <span className={`px-1.5 py-0.5 text-xs font-medium rounded ${
@@ -387,10 +393,10 @@ export default function ModelsView() {
                 }`}>
                   {engine.backend.webgpu
                     ? (engine.backend.gpuLayersUsed >= engine.backend.totalLayers
-                      ? `✓ GPU (${engine.backend.totalLayers}/${engine.backend.totalLayers})`
-                      : `✓ GPU partial (${engine.backend.gpuLayersUsed}/${engine.backend.totalLayers})`)
+                      ? `GPU (${engine.backend.totalLayers}/${engine.backend.totalLayers})`
+                      : `GPU partial (${engine.backend.gpuLayersUsed}/${engine.backend.totalLayers})`)
                     : state.generation.gpuEnabled
-                      ? '✗ GPU Failed'
+                      ? 'GPU Failed'
                       : 'CPU'}
                 </span>
                 <span className={`px-2 py-1 text-xs font-medium rounded-lg border ${
@@ -398,7 +404,7 @@ export default function ModelsView() {
                     ? 'bg-blue-600/20 text-blue-400 border-blue-600/30'
                     : 'bg-zinc-700/50 text-zinc-400 border-zinc-700'
                 }`}>
-                  {engine.backend.multiThread ? `✓ ${engine.backend.threads} Threads` : '1 Thread'}
+                  {engine.backend.multiThread ? `${engine.backend.threads} Threads` : '1 Thread'}
                 </span>
               </div>
               <p className="text-xs text-zinc-600 mt-1.5">

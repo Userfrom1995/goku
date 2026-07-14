@@ -17,6 +17,8 @@ export interface ModelRecord {
   parameterCount: string;
   downloadedAt: number;
   storageKey: string;
+  files?: string[];
+  totalShards?: number;
 }
 
 interface ChatMessageRecord {
