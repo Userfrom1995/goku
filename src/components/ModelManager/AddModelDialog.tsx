@@ -10,7 +10,7 @@ import type { ModelMetadata, DownloadTask } from '../../types';
 interface Props { onClose: () => void }
 
 export default function AddModelDialog({ onClose }: Props) {
-  const { state, dispatch } = useApp();
+  const { state, dispatch, cancelDownload } = useApp();
   const [url, setUrl] = useState('');
   const [token, setToken] = useState('');
   const [step, setStep] = useState<'input' | 'select' | 'confirm'>('input');
@@ -101,6 +101,12 @@ export default function AddModelDialog({ onClose }: Props) {
     dispatch({ type: 'ADD_DOWNLOAD', task });
     onClose();
 
+    // Create abort controller for this download
+    const abortController = new AbortController();
+    // Store it in a way that cancelDownload can access it
+    (window as any).__gokuAbortControllers = (window as any).__gokuAbortControllers || {};
+    (window as any).__gokuAbortControllers[task.id] = abortController;
+
     // Background download using CacheManager (streaming, no memory buffer)
     (async () => {
       try {
@@ -110,6 +116,7 @@ export default function AddModelDialog({ onClose }: Props) {
 
         await cache.download(downloadUrl, {
           headers,
+          signal: abortController.signal,
           progressCallback: ({ loaded, total }) => {
             if (total > 0) {
               dispatch({ type: 'UPDATE_DOWNLOAD', id: task.id, update: {
@@ -131,6 +138,7 @@ export default function AddModelDialog({ onClose }: Props) {
           quantization: metadata?.quantization || 'unknown',
           architecture: metadata?.architecture || 'unknown',
           contextLength: metadata?.contextLength || 2048,
+          totalLayers: metadata?.totalLayers || 0,
           parameterCount: metadata?.parameterCount || 'unknown',
           downloadedAt: Date.now(),
           storageKey: downloadUrl, // Use URL as storage key for CacheManager

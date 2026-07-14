@@ -40,33 +40,49 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
           {/* Device */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium text-zinc-300">Device Capabilities</h3>
+              <h3 className="text-sm font-medium text-zinc-300">Device</h3>
               <span className="text-xs text-zinc-600">
                 {device.isAutoDetected ? 'Auto-detected' : 'Custom values'}
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-zinc-500 mb-1">RAM (GB)</label>
+            {/* RAM */}
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">RAM (GB)</label>
+              <div className="flex items-center gap-2">
                 <input
+                  type="number"
+                  min={1}
+                  max={device.ramDetected ? device.ram : 128}
                   value={ram}
                   onChange={e => setRam(e.target.value)}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-violet-600/50"
+                  className="w-24 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:ring-1 focus:ring-violet-600/50"
                 />
+                <span className="text-xs text-zinc-600">GB</span>
               </div>
-              <div>
-                <label className="block text-xs text-zinc-500 mb-1">Device Tier</label>
-                <select
-                  value={tier}
-                  onChange={e => setTier(e.target.value as 'low' | 'medium' | 'high')}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-violet-600/50"
-                >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </div>
+              {device.isAutoDetected && device.ramDetected && (
+                <p className="text-xs text-emerald-500/70 mt-1">Chromium detected {device.ram} GB. Do not exceed.</p>
+              )}
+              {device.isAutoDetected && !device.ramDetected && (
+                <p className="text-xs text-amber-500/70 mt-1">Detection failed (non-Chromium). Using default {device.ram} GB.</p>
+              )}
+              {!device.isAutoDetected && (
+                <p className="text-xs text-amber-500/70 mt-1">Manual override active</p>
+              )}
+            </div>
+
+            {/* Tier */}
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">Device Tier</label>
+              <select
+                value={tier}
+                onChange={e => setTier(e.target.value as 'low' | 'medium' | 'high')}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-violet-600/50"
+              >
+                <option value="low">Low (≤2 GB)</option>
+                <option value="medium">Medium (3–4 GB)</option>
+                <option value="high">High (≥8 GB)</option>
+              </select>
             </div>
 
             <div className="flex gap-2">
@@ -88,9 +104,10 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
               </span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-zinc-500">Storage Quota</span>
+              <span className="text-zinc-500">Browser Storage Cap</span>
               <span className="text-zinc-400">{device.storage} GB</span>
             </div>
+            <p className="text-xs text-zinc-600">Max storage the browser allows this site to use. Not adjustable.</p>
           </div>
         </div>
 

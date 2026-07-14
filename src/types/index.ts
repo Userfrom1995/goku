@@ -7,7 +7,8 @@ export interface ModelMetadata {
   sizeBytes: number;
   quantization: string;
   architecture: string;
-  contextLength: number;
+  contextLength: number; // Model's max context from GGUF
+  totalLayers: number; // Model's total layers (from GGUF or discovered after load)
   parameterCount: string;
   downloadedAt: number;
   storageKey: string;
@@ -15,6 +16,7 @@ export interface ModelMetadata {
 
 export interface DeviceCapabilities {
   ram: number;
+  ramDetected: boolean; // true = Chromium navigator.deviceMemory, false = guessed from UA
   storage: number;
   hasWebGPU: boolean;
   tier: 'low' | 'medium' | 'high';
@@ -46,12 +48,13 @@ export interface ChatSession {
 
 export interface GenerationSettings {
   temperature: number;
-  maxTokens: number;
   contextLength: number;
   topP: number;
   topK: number;
   systemPrompt: string;
   nGpuLayers: number; // 0 = CPU only, 99999 = auto (all layers)
+  gpuEnabled: boolean; // UI toggle, maps to nGpuLayers: 0 or 99999
+  gpuAdaptive: boolean; // Try all layers, fallback down automatically
 }
 
 export type EngineState = 'idle' | 'loading' | 'ready' | 'generating' | 'error';
@@ -61,6 +64,10 @@ export interface EngineBackend {
   threads: number;
   webgpu: boolean;
   multiThread: boolean;
+  gpuLayersUsed: number;
+  totalLayers: number;
+  gpuFailed: boolean;
+  nCtxTrain: number; // Model's actual training context length (from wllama after load)
 }
 
 export interface EngineStatus {
@@ -70,6 +77,7 @@ export interface EngineStatus {
   error: string | null;
   tokensPerSecond: number;
   backend: EngineBackend | null;
+  loadedContextLength: number; // Actual n_ctx used during load
 }
 
 export interface DownloadTask {

@@ -8,6 +8,7 @@ export async function detectDeviceCapabilities(
   if (overrides?.ram || overrides?.tier) {
     return {
       ram: overrides.ram ?? guessRAM(),
+      ramDetected: false,
       storage: overrides.storage ?? (await getStorageQuota()),
       hasWebGPU: !!navigator.gpu,
       tier: overrides.tier ?? 'medium',
@@ -15,12 +16,13 @@ export async function detectDeviceCapabilities(
     };
   }
 
-  const ram = getDeviceMemory() || guessRAM();
+  const detected = getDeviceMemory();
+  const ram = detected || guessRAM();
   const storage = await getStorageQuota();
   const hasWebGPU = !!navigator.gpu;
   const tier = classifyDevice(ram);
 
-  return { ram, storage, hasWebGPU, tier, isAutoDetected: true };
+  return { ram, ramDetected: !!detected, storage, hasWebGPU, tier, isAutoDetected: true };
 }
 
 function getDeviceMemory(): number | undefined {

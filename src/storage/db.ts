@@ -13,6 +13,7 @@ export interface ModelRecord {
   quantization: string;
   architecture: string;
   contextLength: number;
+  totalLayers: number;
   parameterCount: string;
   downloadedAt: number;
   storageKey: string;

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
@@ -37,6 +37,17 @@ export default function ChatView() {
   const activeSession = state.sessions.find(s => s.id === state.activeSessionId);
   const messages = activeSession?.messages || [];
 
+  // Use the actual context the model was loaded with
+  const contextLength = state.engine.loadedContextLength || 2048;
+
+  const estimatedTokens = useMemo(() => {
+    const allText = messages.map(m => m.content).join('');
+    const systemText = state.generation.systemPrompt || '';
+    return Math.ceil((allText.length + systemText.length) / 4);
+  }, [messages, state.generation.systemPrompt]);
+
+  const contextPercent = Math.min(100, Math.round((estimatedTokens / contextLength) * 100));
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -60,7 +71,16 @@ export default function ChatView() {
             <span className="text-xs text-violet-400 animate-pulse">Generating...</span>
           )}
           {state.engine.state === 'ready' && state.activeModelId && (
-            <span className="text-xs text-emerald-500">Ready</span>
+            <div className="flex items-center gap-2" title={`${estimatedTokens.toLocaleString()} / ${contextLength.toLocaleString()} tokens (~${contextPercent}%)`}>
+              <span className="text-xs text-zinc-500">ctx</span>
+              <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${contextPercent > 90 ? 'bg-red-500' : contextPercent > 70 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                  style={{ width: `${contextPercent}%` }}
+                />
+              </div>
+              <span className="text-xs text-zinc-500">{contextPercent}%</span>
+            </div>
           )}
         </div>
       </div>

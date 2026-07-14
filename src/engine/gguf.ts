@@ -3,6 +3,7 @@ export interface GgufMetadata {
   quantization: string;
   parameterCount: string;
   contextLength: number;
+  totalLayers: number;
   name: string;
   fileSize: number;
 }
@@ -133,11 +134,14 @@ export async function readGgufMetadata(
     ? `~${metadata[`${arch}.block_count`]} layers`
     : 'unknown';
 
+  const totalLayers = metadata[`${arch}.block_count`] || 0;
+
   return {
     architecture: arch,
     quantization: quantMap[quantVal] || `type_${quantVal}`,
     parameterCount: nParams,
     contextLength: metadata[`${arch}.context_length`] || 2048,
+    totalLayers,
     name: metadata['general.name'] || '',
     fileSize: parseInt(res.headers.get('content-range')?.split('/').pop() || '0', 10) || 0,
   };

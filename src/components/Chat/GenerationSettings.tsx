@@ -37,26 +37,6 @@ export default function GenerationSettings() {
                 onChange={v => update({ temperature: v })}
               />
               <SliderField
-                label="Max Tokens"
-                value={generation.maxTokens}
-                min={64} max={4096} step={64}
-                onChange={v => update({ maxTokens: v })}
-              />
-              <SliderField
-                label="Context Length"
-                value={generation.contextLength}
-                min={512} max={32768} step={512}
-                onChange={v => update({ contextLength: v })}
-                format={v => v.toLocaleString()}
-              />
-              <SliderField
-                label="GPU Layers"
-                value={generation.nGpuLayers}
-                min={0} max={99999} step={1}
-                onChange={v => update({ nGpuLayers: v })}
-                format={v => v === 99999 ? 'Auto' : v === 0 ? 'CPU Only' : v.toLocaleString()}
-              />
-              <SliderField
                 label="Top P"
                 value={generation.topP}
                 min={0} max={1} step={0.05}

@@ -1,7 +1,7 @@
 import { Wllama, type WllamaConfig, type AssetsPathConfig } from '@wllama/wllama';
 
 const WASM_PATHS: AssetsPathConfig = {
-  default: 'https://cdn.jsdelivr.net/npm/@wllama/wllama@3.5.1/src/wasm/wllama.wasm',
+  default: '/goku/wasm/wllama.wasm',
 };
 
 export interface EngineBackend {
@@ -9,10 +9,14 @@ export interface EngineBackend {
   threads: number;
   webgpu: boolean;
   multiThread: boolean;
+  gpuLayersUsed: number;
+  totalLayers: number;
+  gpuFailed: boolean;
+  nCtxTrain: number;
 }
 
 export interface WllamaEngine {
-  loadModelFromBlob(blob: Blob, nCtx: number, nGpuLayers?: number): Promise<EngineBackend>;
+  loadModelFromBlob(blob: Blob, nCtx: number, nGpuLayers?: number, adaptive?: boolean): Promise<EngineBackend>;
   unloadModel(): Promise<void>;
   generate(messages: { role: string; content: string }[], opts: {
     temperature?: number;
@@ -26,15 +30,31 @@ export interface WllamaEngine {
   getModelInfo(): { nCtx: number; nLayer: number; nVocab: number } | null;
 }
 
-function detectBackend(wllama: Wllama): EngineBackend {
-  const webgpu = wllama.isSupportWebGPU();
+function detectBackend(wllama: Wllama, actualNGpuLayers: number, gpuFailed: boolean = false): EngineBackend {
+  const hasWebGPU = !!(navigator as any).gpu;
   const multiThread = wllama.isMultithread();
   const threads = wllama.getNumThreads();
+  const webgpu = hasWebGPU && actualNGpuLayers > 0;
+  const meta = wllama.getModelMetadata();
+  const totalLayers = meta?.hparams?.nLayer || 0;
+  const nCtxTrain = meta?.hparams?.nCtxTrain || 2048;
 
-  if (webgpu && multiThread) return { type: 'webgpu+multi', threads, webgpu: true, multiThread: true };
-  if (webgpu) return { type: 'webgpu', threads: 1, webgpu: true, multiThread: false };
-  if (multiThread) return { type: 'wasm-multi', threads, webgpu: false, multiThread: true };
-  return { type: 'wasm', threads: 1, webgpu: false, multiThread: false };
+  if (webgpu && multiThread) return { type: 'webgpu+multi', threads, webgpu: true, multiThread: true, gpuLayersUsed: actualNGpuLayers, totalLayers, gpuFailed, nCtxTrain };
+  if (webgpu) return { type: 'webgpu', threads: 1, webgpu: true, multiThread: false, gpuLayersUsed: actualNGpuLayers, totalLayers, gpuFailed, nCtxTrain };
+  if (multiThread) return { type: 'wasm-multi', threads, webgpu: false, multiThread: true, gpuLayersUsed: 0, totalLayers, gpuFailed, nCtxTrain };
+  return { type: 'wasm', threads: 1, webgpu: false, multiThread: false, gpuLayersUsed: 0, totalLayers, gpuFailed, nCtxTrain };
+}
+
+async function tryLoadModel(wllama: Wllama, blob: Blob, nCtx: number, nGpuLayers: number): Promise<boolean> {
+  try {
+    await wllama.loadModel([blob], {
+      n_ctx: nCtx || 2048,
+      n_gpu_layers: nGpuLayers,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function createWllamaEngine(): WllamaEngine {
@@ -45,31 +65,59 @@ export function createWllamaEngine(): WllamaEngine {
   };
 
   return {
-    async loadModelFromBlob(blob, nCtx, nGpuLayers = 99999) {
+    async loadModelFromBlob(blob, nCtx, nGpuLayers = 99999, adaptive = true) {
       if (wllama) await wllama.exit();
       wllama = new Wllama(WASM_PATHS, config);
 
-      // Try loading with requested GPU layers
-      try {
-        await wllama.loadModel([blob], {
-          n_ctx: nCtx || 2048,
-          n_gpu_layers: nGpuLayers,
-        });
-        return detectBackend(wllama);
-      } catch (err: any) {
-        // If GPU loading failed and we requested GPU layers, fallback to CPU
-        if (nGpuLayers > 0) {
-          console.warn('GPU loading failed, falling back to CPU:', err.message);
-          if (wllama) await wllama.exit();
-          wllama = new Wllama(WASM_PATHS, config);
+      // Non-adaptive: use exactly what was requested
+      if (!adaptive) {
+        try {
           await wllama.loadModel([blob], {
             n_ctx: nCtx || 2048,
-            n_gpu_layers: 0,
+            n_gpu_layers: nGpuLayers,
           });
-          return detectBackend(wllama);
+          return detectBackend(wllama, nGpuLayers);
+        } catch (err: any) {
+          // If GPU failed and we requested GPU, fallback to CPU
+          if (nGpuLayers > 0) {
+            if (wllama) await wllama.exit();
+            wllama = new Wllama(WASM_PATHS, config);
+            await wllama.loadModel([blob], {
+              n_ctx: nCtx || 2048,
+              n_gpu_layers: 0,
+            });
+            return detectBackend(wllama, 0, true);
+          }
+          throw err;
         }
-        throw err;
       }
+
+      // Adaptive: try different layer counts
+      const attempts = [99999, 64, 32, 16, 8, 4, 2, 1, 0];
+
+      for (const layers of attempts) {
+        if (layers > nGpuLayers) continue;
+
+        console.log(`[Goku Adaptive] Trying ${layers} GPU layers...`);
+        const success = await tryLoadModel(wllama, blob, nCtx, layers);
+
+        if (success) {
+          console.log(`[Goku Adaptive] Success with ${layers} GPU layers`);
+          return detectBackend(wllama, layers);
+        }
+
+        // Reset for next attempt
+        if (wllama) await wllama.exit();
+        wllama = new Wllama(WASM_PATHS, config);
+      }
+
+      // All GPU attempts failed, try CPU only
+      console.log('[Goku Adaptive] All GPU attempts failed, using CPU only');
+      await wllama.loadModel([blob], {
+        n_ctx: nCtx || 2048,
+        n_gpu_layers: 0,
+      });
+      return detectBackend(wllama, 0);
     },
 
     async unloadModel() {
