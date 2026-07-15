@@ -2,7 +2,7 @@
 
 A fully client-side web app for running open-source LLMs directly in your browser. Powered by [wllama](https://github.com/ngxson/wllama) (llama.cpp compiled to WebAssembly) with WebGPU acceleration support. No server, no backend, no data leaves your machine.
 
-**[Live Demo](https://userfrom1995.github.io/goku/)**
+**[Try it now](https://userfrom1995.github.io/goku/)**
 
 ## Highlights
 
