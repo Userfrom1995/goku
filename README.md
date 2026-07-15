@@ -66,17 +66,11 @@ Open `http://localhost:5173/goku/` in your browser.
 
 ## Multi-Threading on GitHub Pages
 
-SharedArrayBuffer requires `Cross-Origin-Embedder-Policy` and `Cross-Origin-Opener-Policy` headers.
+SharedArrayBuffer requires `Cross-Origin-Embedder-Policy` and `Cross-Origin-Opener-Policy` headers, which GitHub Pages cannot set.
 
-**This app uses the Service Worker approach by default.** It activates automatically on first visit - no setup needed. The Service Worker (`public/sw.js`) intercepts requests and injects the required headers.
+We solve this with a Service Worker (`public/sw.js`) that intercepts all same-origin requests and injects the required headers. It activates automatically on first visit - no setup needed. Multi-threading works out of the box.
 
-If you want better performance (15-50 tok/s instead of 3-8 tok/s), deploy a Cloudflare Worker proxy instead:
-
-```bash
-cd proxy
-# Edit deploy.sh and set SITE_URL to your GitHub Pages URL
-./deploy.sh
-```
+If you don't want the Service Worker, see `proxy/README.md` for another approach.
 
 ## Tech Stack
 
