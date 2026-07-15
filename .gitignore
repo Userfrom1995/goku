@@ -30,3 +30,4 @@ PLAN.md
 *.njsproj
 *.sln
 *.sw?
+coi-serviceworker/

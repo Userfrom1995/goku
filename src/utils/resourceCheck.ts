@@ -73,8 +73,8 @@ export function clearOverrides(): void {
 export function getRecommendedMaxModelSize(tier: 'low' | 'medium' | 'high'): number {
   switch (tier) {
     case 'low': return 500 * 1024 * 1024;
-    case 'medium': return 1500 * 1024 * 1024;
-    case 'high': return 2500 * 1024 * 1024;
+    case 'medium': return 2 * 1024 * 1024 * 1024;
+    case 'high': return 4 * 1024 * 1024 * 1024;
   }
 }
 
