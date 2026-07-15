@@ -66,13 +66,11 @@ Open `http://localhost:5173/goku/` in your browser.
 
 ## Multi-Threading on GitHub Pages
 
-SharedArrayBuffer requires `Cross-Origin-Embedder-Policy` and `Cross-Origin-Opener-Policy` headers. Two options:
+SharedArrayBuffer requires `Cross-Origin-Embedder-Policy` and `Cross-Origin-Opener-Policy` headers.
 
-**Option 1: Service Worker (automatic)**
-The app includes a Service Worker (`public/sw.js`) that injects the required headers. No setup needed - it activates automatically on first visit.
+**This app uses the Service Worker approach by default.** It activates automatically on first visit - no setup needed. The Service Worker (`public/sw.js`) intercepts requests and injects the required headers.
 
-**Option 2: Cloudflare Worker (optional, better performance)**
-Deploy a reverse proxy for 15-50 tok/s instead of 3-8 tok/s:
+If you want better performance (15-50 tok/s instead of 3-8 tok/s), deploy a Cloudflare Worker proxy instead:
 
 ```bash
 cd proxy
